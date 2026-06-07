@@ -1,50 +1,46 @@
 import matplotlib.pyplot as plt
 
-# ==============================================================================
-# 1. PARAMETER SISTEM & KONFIGURASI THRESHOLD (LOGIKA BISNIS)
-# ==============================================================================
-THRESHOLD_VELOCITY_COUNT = 3        # Maksimal frekuensi transaksi (Konieks: D&C)
-THRESHOLD_NOMINAL_EKSTREM = 1000000  # Batas nominal wajar Rp 1.000.000
-BLACKLIST_PATTERN = "DEV_MALWARE"    # Pola string perangkat fraud (Konieks: Rabin-Karp)
+# --- KONFIGURASI DAN AMBANG BATAS ---
+MAX_VELOCITY = 3          # Batas frekuensi transaksi user (D&C)
+BATAS_NOMINAL = 1000000    # Batas nominal ekstrem Rp 1 juta
+MALWARE_KEYWORD = "DEV_MALWARE"  # Pattern string untuk Rabin-Karp
 
-# Pembobotan Skor Risiko (Risk Scoring Matrix)
-BOBOT_RABIN_KARP = 50   # Signatures/perangkat terlarang
-BOBOT_VELOCITY = 35     # Indikasi flooding/velocity attack
-BOBOT_NOMINAL = 15      # Lonjakan nominal ekstrem
+# Pembobotan skor berdasarkan kriteria instansi
+SKOR_RK = 50       # Cek blacklist device
+SKOR_VELO = 35     # Cek velocity attack
+SKOR_NOMINAL = 15  # Cek nominal jumbo
 
-# Slot kuota penanganan harian oleh investigator (Bounded Capacity)
-SLOT_INVESTIGASI_HARIAN = 3
+KUOTA_HARIAN = 3   # Slot maksimal investigasi (Greedy capacity)
 
-# ==============================================================================
-# 2. DATASET SIMULASI (DATA LOG TRANSAKSI QRIS)
-# ==============================================================================
+
+# --- DATASET SIMULASI LOG TRANSAKSI QRIS ---
 dataset_qris = [
-    {"tx_id": "TX001", "user": "Nayaka", "device": "DEV_IPHONE_77", "amount": 50000, "risk_score": 0},
-    {"tx_id": "TX002", "user": "Budi",   "device": "DEV_SAMSUNG_01", "amount": 15000, "risk_score": 0},
-    {"tx_id": "TX003", "user": "Nayaka", "device": "DEV_IPHONE_77", "amount": 45000, "risk_score": 0}, 
-    {"tx_id": "TX004", "user": "Siti",   "device": "DEV_XIAOMI_99",  "amount": 2500000, "risk_score": 0}, # Melanggar THRESHOLD_NOMINAL_EKSTREM
-    {"tx_id": "TX005", "user": "Nayaka", "device": "DEV_IPHONE_77", "amount": 60000, "risk_score": 0}, # Skor 35, nominal tertinggi di antara kelompok 'Nayaka'
-    {"tx_id": "TX006", "user": "Andi",   "device": "DEV_MALWARE_X",  "amount": 25000, "risk_score": 0}, # Melanggar BLACKLIST_PATTERN
-    {"tx_id": "TX007", "user": "Budi",   "device": "DEV_SAMSUNG_01", "amount": 30000, "risk_score": 0},
-    {"tx_id": "TX008", "user": "Siti",   "device": "DEV_XIAOMI_99",  "amount": 1500000, "risk_score": 0}, # Melanggar THRESHOLD_NOMINAL_EKSTREM
+    {"id_tx": "TX001", "user": "Nayaka", "device": "DEV_IPHONE_77", "amount": 50000, "skor": 0},
+    {"id_tx": "TX002", "user": "Budi",   "device": "DEV_SAMSUNG_01", "amount": 15000, "skor": 0},
+    {"id_tx": "TX003", "user": "Nayaka", "device": "DEV_IPHONE_77", "amount": 45000, "skor": 0}, 
+    {"id_tx": "TX004", "user": "Siti",   "device": "DEV_XIAOMI_99",  "amount": 2500000, "skor": 0}, 
+    {"id_tx": "TX005", "user": "Nayaka", "device": "DEV_IPHONE_77", "amount": 60000, "skor": 0}, 
+    {"id_tx": "TX006", "user": "Andi",   "device": "DEV_MALWARE_X",  "amount": 25000, "skor": 0}, 
+    {"id_tx": "TX007", "user": "Budi",   "device": "DEV_SAMSUNG_01", "amount": 30000, "skor": 0},
+    {"id_tx": "TX008", "user": "Siti",   "device": "DEV_XIAOMI_99",  "amount": 1500000, "skor": 0}, 
 ]
 
-# ==============================================================================
-# 3. IMPLEMENTASI ALGORITMA PARADIGMA KLASIK (OPTIMIZED)
-# ==============================================================================
 
-# --- [A] PARADIGMA 1: STRING MATCHING (RABIN-KARP O(n+m)) ---
-# Referensi Teoretis: Karp & Rabin (1987)
-def rabin_karp_search(text, pattern):
+# ==============================================================================
+# FUNGSI ALGORITMA
+
+# 1. Algoritma Rabin-Karp (Pattern Matching)
+def pencocokan_rabin_karp(text, pattern):
     d = 256     
-    q = 1000003 # Nilai prima ditingkatkan untuk skala industri mendeteksi anomali tanpa kolisi hash
+    q = 1000003 # Pakai prima besar biar gak gampang kolisi (spurious hits)
     m = len(pattern)
     n = len(text)
     p = 0       
     t = 0       
     h = 1
 
-    if m > n: return False
+    if m > n: 
+        return False
 
     for i in range(m - 1):
         h = (h * d) % q
@@ -55,113 +51,115 @@ def rabin_karp_search(text, pattern):
 
     for i in range(n - m + 1):
         if p == t:
-            match = True
+            cocok = True
             for j in range(m):
                 if text[i + j] != pattern[j]:
-                    match = False
+                    cocok = False
                     break
-            if match: return True
+            if cocok: 
+                return True
 
         if i < n - m:
             t = (d * (t - ord(text[i]) * h) + ord(text[i + m])) % q
-            if t < 0: t = t + q
+            if t < 0: 
+                t = t + q
     return False
 
 
-# --- [B] PARADIGMA 2: DIVIDE AND CONQUER FREQUENCY MAP (O(n)) ---
-# Referensi Teoretis: Cormen et al. (2009) - Pendekatan Global MapReduce Rekursif
-def build_frequency_map_dc(data):
-    # Base Case 1: Array Kosong
+# 2. Algoritma Divide and Conquer (Hitung Frekuensi Global - Pre-processing O(n))
+def hitung_frekuensi_dc(data):
+    # Base case kalau array kosong atau cuma 1 elemen
     if len(data) == 0:
         return {}
-    # Base Case 2: Array Tunggal (Conquer)
     if len(data) == 1:
         return {data[0]["user"]: 1}
 
-    # Divide: Memotong data log menjadi dua bagian setara
-    mid = len(data) // 2
-    left_map = build_frequency_map_dc(data[:mid])
-    right_map = build_frequency_map_dc(data[mid:])
+    # Tahap Divide: Bagi data jadi dua kelompok (kiri & kanan)
+    tengah = len(data) // 2
+    peta_kiri = hitung_frekuensi_dc(data[:tengah])
+    peta_kanan = hitung_frekuensi_dc(data[tengah:])
 
-    # Combine: Menggabungkan kamus frekuensi dari sub-masalah kiri dan kanan
-    combined_map = left_map.copy()
-    for user, count in right_map.items():
-        if user in combined_map:
-            combined_map[user] += count
+    # Tahap Combine: Gabungin hasil hitungan kamus kiri dan kanan
+    hasil_gabungan = peta_kiri.copy()
+    for user, jumlah in peta_kanan.items():
+        if user in hasil_gabungan:
+            hasil_gabungan[user] += jumlah
         else:
-            combined_map[user] = count
+            hasil_gabungan[user] = jumlah
             
-    return combined_map
+    return hasil_gabungan
 
 
-# --- [C] PARADIGMA 3: STRATEGI GREEDY DENGAN TIE-BREAKING (O(n log n)) ---
-# Referensi Teoretis: Kleinberg & Tardos (2005) - Berbasis Multi-Criterion Sorting
-def greedy_fraud_selection_optimized(data, max_slots):
-    # Urutkan berdasarkan Kriteria Utama (risk_score DESC), lalu Kriteria Kedua (amount DESC) jika skor risiko seri
-    # Ini adalah implementasi formal penanganan Tie-Breaking pada Strategi Greedy
-    sorted_data = sorted(data, key=lambda x: (x["risk_score"], x["amount"]), reverse=True)
+# 3. Strategi Greedy dengan Fitur Pemutus Seri / Tie-Breaking
+def seleksi_greedy_kasus(data, kuota):
+    # Urutkan multi-level: Prioritas utama berdasarkan skor (DESC), 
+    # kalau skor seri diurutkan berdasarkan amount/nominal terbesar (DESC)
+    data_terurut = sorted(data, key=lambda x: (x["skor"], x["amount"]), reverse=True)
     
-    selected_anomalies = []
-    for i in range(min(max_slots, len(sorted_data))):
-        if sorted_data[i]["risk_score"] > 0:
-            selected_anomalies.append(sorted_data[i])
+    kasus_terpilih = []
+    for i in range(min(kuota, len(data_terurut))):
+        if data_terurut[i]["skor"] > 0:
+            kasus_terpilih.append(data_terurut[i])
             
-    return selected_anomalies
+    return kasus_terpilih
 
-# ==============================================================================
-# 4. PIPELINE EKSEKUSI & EVALUASI DATA TRANSAKSI
-# ==============================================================================
-print("=== MEMULAI PIPELINE EVALUASI RISIKO TRANSAKSI QRIS (FIX OPTIMIZED) ===\n")
 
-# Eksekusi Divide and Conquer SATU KALI di awal untuk performa O(n) murni
-frequency_map = build_frequency_map_dc(dataset_qris)
+
+# PIPELINE PROSES UTAMA
+
+print("--- PROSES PEMERIKSAAN FRAUD TRANSAKSI QRIS ---\n")
+
+# Jalankan fungsi D&C satu kali di awal biar performa tetap O(n) murni
+map_frekuensi = hitung_frekuensi_dc(dataset_qris)
 
 for tx in dataset_qris:
-    # Aturan 1: Pemindaian Tekstual Perangkat Menggunakan Rabin-Karp
-    if rabin_karp_search(tx["device"], BLACKLIST_PATTERN):
-        tx["risk_score"] += BOBOT_RABIN_KARP
-        print(f"[ALERT RABIN-KARP] {tx['tx_id']} - Perangkat terindikasi Blacklist Pattern ({tx['device']}). Skor +{BOBOT_RABIN_KARP}")
+    # Kriteria 1: Cek kecocokan string device dengan Rabin-Karp
+    if pencocokan_rabin_karp(tx["device"], MALWARE_KEYWORD):
+        tx["skor"] += SKOR_RK
+        print(f"[ALERT] {tx['id_tx']} - Device masuk blacklist ({tx['device']}). Skor +{SKOR_RK}")
 
-    # Aturan 2: Pencocokan Frekuensi Hasil Olahan D&C Map
-    frekuensi = frequency_map.get(tx["user"], 0)
-    if frekuensi >= THRESHOLD_VELOCITY_COUNT:
-        tx["risk_score"] += BOBOT_VELOCITY
-        print(f"[ALERT DIVIDE & CONQUER] {tx['tx_id']} - Defisit Velocity! User '{tx['user']}' bertransaksi {frekuensi}x. Skor +{BOBOT_VELOCITY}")
+    # Kriteria 2: Cek frekuensi transaksi dari hasil Divide & Conquer
+    total_tx_user = map_frekuensi.get(tx["user"], 0)
+    if total_tx_user >= MAX_VELOCITY:
+        tx["skor"] += SKOR_VELO
+        print(f"[ALERT] {tx['id_tx']} - Indikasi Velocity Attack! User '{tx['user']}' transaksi {total_tx_user}x. Skor +{SKOR_VELO}")
 
-    # Aturan 3: Validasi Batas Nominal Finansial
-    if tx["amount"] > THRESHOLD_NOMINAL_EKSTREM:
-        tx["risk_score"] += BOBOT_NOMINAL
-        print(f"[ALERT AMBANG NOMINAL] {tx['tx_id']} - Nominal Rp {tx['amount']} melewati ambang batas Rp {THRESHOLD_NOMINAL_EKSTREM}. Skor +{BOBOT_NOMINAL}")
+    # Kriteria 3: Validasi nilai nominal transaksi
+    if tx["amount"] > BATAS_NOMINAL:
+        tx["skor"] += SKOR_NOMINAL
+        print(f"[ALERT] {tx['id_tx']} - Nominal Rp {tx['amount']} melampaui batas wajar. Skor +{SKOR_NOMINAL}")
 
-# Lapisan Pengambilan Keputusan Akhir Menggunakan Strategi Greedy Teroptimasi
-kasus_kritis = greedy_fraud_selection_optimized(dataset_qris, SLOT_INVESTIGASI_HARIAN)
+# Alokasi penanganan kasus kritis dengan Greedy
+investigasi_hari_ini = seleksi_greedy_kasus(dataset_qris, KUOTA_HARIAN)
 
-print(f"\n=== HASIL SELEKSI OPTIMAL GREEDY (Slot Maksimal: {SLOT_INVESTIGASI_HARIAN}) ===")
-for idx, kasus in enumerate(kasus_kritis, start=1):
-    print(f"Peringkat {idx}: {kasus['tx_id']} | User: {kasus['user']} | Nominal: Rp {kasus['amount']} | Total Skor Risiko: {kasus['risk_score']}")
+print(f"\n--- REKOMENDASI KASUS PRIORITAS (Maksimal Slot: {KUOTA_HARIAN}) ---")
+for urutan, item in enumerate(investigasi_hari_ini, start=1):
+    print(f"Peringkat {urutan}: {item['id_tx']} | User: {item['user']} | Nominal: Rp {item['amount']} | Total Skor: {item['skor']}")
 
-# ==============================================================================
-# 5. VISUALISASI MATPLOTLIB (BAHAN GRAFIK MAKALAH)
-# ==============================================================================
-tx_ids = [tx["tx_id"] for tx in dataset_qris]
-skor_risiko = [tx["risk_score"] for tx in dataset_qris]
 
-id_kasus_kritis = [k["tx_id"] for k in kasus_kritis]
-warna_batang = ['#e74c3c' if tx_id in id_kasus_kritis else '#3498db' for tx_id in tx_ids]
+#
+# PLOTTING GRAFIK EVALUASI
 
-plt.figure(figsize=(10, 6))
-bars = plt.bar(tx_ids, skor_risiko, color=warna_batang, edgecolor='black', zorder=3)
+list_id = [tx["id_tx"] for tx in dataset_qris]
+list_skor = [tx["skor"] for tx in dataset_qris]
 
-plt.title("Analisis Komparasi Tingkat Risiko Transaksi QRIS (Optimized)\n(Merah = Kasus Kritis Prioritas Hasil Pilihan Algoritma Greedy)", fontsize=13, fontweight='bold')
-plt.xlabel("ID Transaksi Digital (QRIS)", fontsize=11)
-plt.ylabel("Total Skor Risiko (Risk Score Scale 0-100)", fontsize=11)
+id_prioritas = [k["id_tx"] for k in investigasi_hari_ini]
+pilihan_warna = ['#e74c3c' if item_id in id_prioritas else '#3498db' for item_id in list_id]
+
+plt.figure(figsize=(9, 5.5))
+batang = plt.bar(list_id, list_skor, color=pilihan_warna, edgecolor='black', zorder=3)
+
+plt.title("Analisis Komparasi Risiko Transaksi QRIS\n(Batang Merah = Kasus Prioritas Utama Hasil Seleksi Greedy)", fontsize=12, fontweight='bold')
+plt.xlabel("ID Transaksi", fontsize=10)
+plt.ylabel("Skor Risiko (0 - 100)", fontsize=10)
 plt.ylim(0, 100)
-plt.grid(axis='y', linestyle='--', alpha=0.7, zorder=0)
+plt.grid(axis='y', linestyle='--', alpha=0.5, zorder=0)
 
-for bar in bars:
-    yval = bar.get_height()
-    if yval > 0:
-        plt.text(bar.get_x() + bar.get_width()/2.0, yval + 2, f"{yval}", ha='center', va='bottom', fontweight='bold')
+# Tampilin angka skor di atas batang grafiknya
+for b in batang:
+    tinggi = b.get_height()
+    if tinggi > 0:
+        plt.text(b.get_x() + b.get_width()/2.0, tinggi + 2, f"{tinggi}", ha='center', va='bottom', fontweight='bold')
 
 plt.tight_layout()
 plt.show()
